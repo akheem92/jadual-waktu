@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ms"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sistem Jadual Waktu Sekolah</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<style>
+:root{--b:#1d4ed8;--b2:#2563eb;--bg:#eff6ff;--bd:#dbeafe}
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:var(--bg);color:#0f172a}
+header{background:linear-gradient(90deg,#1e3a8a,var(--b2));color:#fff;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+header h1{margin:0;font-size:18px}header small{opacity:.8}
+nav{background:#fff;padding:8px 14px;display:flex;gap:6px;overflow-x:auto;border-bottom:1px solid var(--bd)}
+nav button{background:none;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;white-space:nowrap;font-size:14px}
+nav button.on{background:var(--b2);color:#fff}
+main{max-width:1200px;margin:16px auto;padding:0 12px}
+.card{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+.card h3{margin:0 0 10px;color:var(--b)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#475569}
+input,select{padding:8px;border:1px solid #bfdbfe;border-radius:8px;font-size:14px;min-width:120px}
+input[type=color]{padding:2px;height:36px;min-width:50px}input[type=checkbox]{min-width:0}
+button{font:inherit;cursor:pointer}
+.btn{background:var(--b2);color:#fff;border:0;border-radius:8px;padding:9px 16px}.btn:hover{background:var(--b)}
+.ghost{background:#fff;border:1px solid #bfdbfe;border-radius:8px;padding:6px 10px;color:var(--b)}
+.danger{background:#fee2e2;color:#b91c1c;border:0;border-radius:8px;padding:9px 16px}
+.sc{overflow-x:auto}table{border-collapse:collapse;width:100%}
+th{background:var(--b);color:#fff;padding:8px;text-align:center}td{border:1px solid var(--bd);padding:6px;vertical-align:top}
+.tt td{min-width:130px;height:62px}.tt td.ed:hover{background:#eff6ff;cursor:pointer}
+.tm{background:#f1f5f9;text-align:center;white-space:nowrap;font-size:12px;min-width:0!important}
+.rh{background:#fef3c7;text-align:center;font-weight:600;color:#92400e;height:auto!important}
+.chip,.pill{--c:#2563eb;background:color-mix(in srgb,var(--c) 20%,#fff);border-left:4px solid var(--c);border-radius:6px}
+.chip{padding:4px 6px;margin:2px 0;cursor:pointer}.chip small{display:block;color:#475569}
+.dot{display:inline-block;width:18px;height:18px;border-radius:50%}
+dialog{border:0;border-radius:14px;padding:18px;width:min(560px,94vw)}dialog::backdrop{background:#0f172a80}
+fieldset{border:1px solid var(--bd);border-radius:10px;margin:0 0 10px}legend{color:var(--b);font-weight:600;text-transform:capitalize}
+.chk{display:flex;flex-wrap:wrap;gap:6px;max-height:130px;overflow:auto}
+.pill{flex-direction:row;align-items:center;gap:4px;padding:4px 8px;color:#0f172a;font-size:13px}
+.hint{color:#64748b;font-size:12px}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1e3a8a;color:#fff;padding:10px 18px;border-radius:10px;display:none;z-index:99}
+header button{background:#fff;color:var(--b);border:0;border-radius:8px;padding:8px 14px}
+</style></head><body>
+<header><div><h1 id="sn">Jadual Waktu</h1><small>Sistem Jadual &amp; Guru Ganti · Dua Sesi</small></div><div id="auth"></div></header>
+<nav id="nav"></nav><main id="main"></main><div id="toast"></div>
+<dialog id="dlg"></dialog>
+<dialog id="lg"><form onsubmit="login(event);return false"><h3>Log Masuk Admin</h3>
+<div class="row"><label>E-mel<input name="e" type="email" required></label><label>Kata laluan<input name="p" type="password" required></label></div>
+<p class="row"><button class="btn">Log masuk</button><button type="button" class="ghost" onclick="$('#lg').close()">Tutup</button></p></form></dialog>
+<script>
+// ====== TETAPAN SUPABASE (Project Settings > API) ======
+const SB_URL='https://YOUR-PROJECT.supabase.co', SB_KEY='YOUR-ANON-KEY';
+// =======================================================
+const HARI=['','Isnin','Selasa','Rabu','Khamis','Jumaat'],H5=[1,2,3,4,5];
+const db=supabase.createClient(SB_URL,SB_KEY);
+let S={tetapan:{nama:'Nama Sekolah',alamat:'',tahun:''},guru:[],subjek:[],kelas:[],loceng:[],jadual:[],ganti:[],kad:[]},admin=false,tab='jadual',E={};
+let V={mode:'kelas',id:'',sesi:'pagi'},G={tarikh:new Date().toISOString().slice(0,10),sesi:'pagi',guru:''};
+const $=s=>document.querySelector(s),by=(a,i)=>S[a].find(x=>x.id==i),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const gn=i=>{const g=by('guru',i);return g?(g.kod||g.nama):'?'},msg=t=>{const e=$('#toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',2600)};
+const slots=s=>S.loceng.filter(l=>l.sesi==s),tm=(s,n)=>{const l=slots(s).find(x=>x.slot==n&&!x.rehat);return l?l.mula+'–'+l.tamat:''};
+const rgb=h=>[1,3,5].map(i=>Math.round(parseInt(h.substr(i,2),16)*.25+255*.75));
+const kn=l=>l.kelas_ids.map(i=>by('kelas',i)?.nama).join(', '),sn=l=>l.subjek_ids.map(i=>by('subjek',i)?.kod||by('subjek',i)?.nama).join(' / ');
+
+async function load(){
+  if(SB_KEY.startsWith('YOUR')){$('#main').innerHTML='<div class=card><h3>Sambungan belum ditetapkan</h3>Edit SB_URL dan SB_KEY di bahagian atas skrip dalam index.html.</div>';return}
+  for(const t of ['guru','subjek','kelas','loceng','jadual','ganti','kad']){let a=[];for(let p=0;;p+=1000){const{data,error}=await db.from(t).select('*').order('id').range(p,p+999);if(error)return msg(error.message);a=a.concat(data);if(data.length<1000)break}S[t]=a}
+  const{data}=await db.from('tetapan').select('*').eq('id',1).maybeSingle();if(data)S.tetapan=data;
+  S.guru.sort((a,b)=>a.nama.localeCompare(b.nama));S.kelas.sort((a,b)=>a.nama.localeCompare(b.nama));S.subjek.sort((a,b)=>a.nama.localeCompare(b.nama));
+  S.loceng.sort((a,b)=>a.sesi.localeCompare(b.sesi)||a.slot-b.slot||(a.mula||'').localeCompare(b.mula||''));render();
+}
+function render(){
+  $('#sn').textContent=S.tetapan.nama+(S.tetapan.tahun?' · '+S.tetapan.tahun:'');
+  $('#auth').innerHTML=admin?'<button onclick="db.auth.signOut()">Log Keluar</button>':'<button onclick="$(\'#lg\').showModal()">Log Masuk Admin</button>';
+  const T=[['jadual','📅 Jadual'],['ganti','🔁 Guru Ganti']].concat(admin?[['kad','🃏 Kad & Jana'],['guru','👩‍🏫 Guru'],['subjek','📚 Subjek'],['kelas','🏫 Kelas'],['loceng','🔔 Waktu Loceng'],['sekolah','⚙️ Sekolah']]:[]);
+  if(!T.find(t=>t[0]==tab))tab='jadual';
+  $('#nav').innerHTML=T.map(([k,l])=>`<button class="${k==tab?'on':''}" onclick="tab='${k}';render()">${l}</button>`).join('');
+  $('#main').innerHTML=tab=='jadual'?vJadual():tab=='ganti'?vGanti():tab=='sekolah'?vSekolah():tab=='kad'?vKad():crud(tab);
+}
+async function login(e){const f=new FormData(e.target);const{error}=await db.auth.signInWithPassword({email:f.get('e'),password:f.get('p')});error?msg('Gagal: '+error.message):($('#lg').close(),msg('Selamat datang, admin'))}
+
+/* ---------- CRUD umum: guru, subjek, kelas, loceng ---------- */
+const CF={guru:['Data Guru',[['nama','Nama Guru'],['kod','Kod'],['warna','Warna','color']]],
+subjek:['Mata Pelajaran',[['nama','Nama Subjek'],['kod','Kod'],['warna','Warna','color']]],
+kelas:['Kelas',[['nama','Nama Kelas (cth: 4 Bestari)'],['sesi','Sesi','sel']]],
+loceng:['Waktu Loceng (rehat = tandakan Rehat)',[['sesi','Sesi','sel'],['slot','Slot No.','number'],['mula','Mula','time'],['tamat','Tamat','time'],['rehat','Rehat','chk']]]};
+function inp([n,l,ty]){const i=ty=='sel'?`<select name=${n}><option value=pagi>Pagi</option><option value=petang>Petang</option></select>`:ty=='chk'?`<input type=checkbox name=${n}>`:`<input name=${n} type=${ty||'text'} ${ty=='color'?'value=#3b82f6':ty=='chk'?'':'required'}>`;return `<label>${l}${i}</label>`}
+function crud(t){const[ti,f]=CF[t];
+  return `<div class=card><h3>${ti}</h3><form id=f_${t} class=row onsubmit="sv(event,'${t}');return false" onreset="this.rid.value=''">${f.map(inp).join('')}<input type=hidden name=rid><button class=btn>Simpan</button><button type=reset class=ghost>Batal</button></form></div>
+  <div class="card sc"><table><tr><th>#</th>${f.map(x=>`<th>${x[1]}</th>`).join('')}<th></th></tr>${S[t].map((r,i)=>`<tr><td>${i+1}</td>${f.map(([n,,ty])=>`<td>${ty=='color'?`<span class=dot style="background:${r[n]}"></span>`:ty=='chk'?(r[n]?'✔':''):esc(r[n])}</td>`).join('')}<td><button class=ghost onclick="ed('${t}','${r.id}')">Edit</button> <button class=ghost onclick="dl('${t}','${r.id}')">Padam</button></td></tr>`).join('')}</table></div>`}
+async function sv(e,t){const fd=new FormData(e.target),o={};for(const[n,,ty]of CF[t][1])o[n]=ty=='chk'?!!fd.get(n):ty=='number'?+fd.get(n):fd.get(n);if(fd.get('rid'))o.id=fd.get('rid');
+  const{error}=await db.from(t).upsert(o);error?msg(error.message):(msg('Disimpan'),load())}
+function ed(t,id){const r=by(t,id),f=$('#f_'+t);CF[t][1].forEach(([n,,ty])=>{ty=='chk'?f[n].checked=r[n]:f[n].value=r[n]??''});f.rid.value=id;scrollTo(0,0)}
+async function dl(t,id){if(!confirm('Padam rekod ini?'))return;const{error}=await db.from(t).delete().eq('id',id);error?msg(error.message):(msg('Dipadam'),load())}
+function vSekolah(){const t=S.tetapan;return `<div class=card><h3>Maklumat Sekolah</h3><form class=row onsubmit="svS(event);return false"><label>Nama Sekolah<input name=nama value="${esc(t.nama)}" required></label><label>Alamat<input name=alamat value="${esc(t.alamat)}"></label><label>Tahun<input name=tahun value="${esc(t.tahun)}"></label><button class=btn>Simpan</button></form></div>`}
+async function svS(e){const o=Object.fromEntries(new FormData(e.target));o.id=1;const{error}=await db.from('tetapan').upsert(o);error?msg(error.message):(msg('Disimpan'),load())}
+
+/* ---------- Jadual waktu ---------- */
+const lessons=(m,id,s,h,n)=>S.jadual.filter(j=>j.sesi==s&&j.hari==h&&j.slot==n&&(m=='kelas'?j.kelas_ids:j.guru_ids).includes(id));
+const txt=l=>(sn(l)||'-')+'\n'+(V.mode=='kelas'?l.guru_ids.map(gn):l.kelas_ids.map(i=>by('kelas',i)?.nama)).join(', ');
+function cellH(l){const c=by('subjek',l.subjek_ids[0])?.warna||'#94a3b8',o=V.mode=='kelas'?l.guru_ids.map(gn):l.kelas_ids.map(i=>by('kelas',i)?.nama);
+  return `<div class=chip style="--c:${c}" ${admin?`onclick="event.stopPropagation();openEd(${l.hari},'${l.sesi}',${l.slot},'${l.id}')"`:''}><b>${esc(sn(l)||'-')}</b><small>${esc(o.join(', '))}</small></div>`}
+function vJadual(){
+  const list=V.mode=='kelas'?S.kelas:S.guru;if(!list.find(x=>x.id==V.id))V.id=list[0]?.id||'';
+  if(V.mode=='kelas'&&V.id)V.sesi=by('kelas',V.id).sesi;
+  const sl=slots(V.sesi),sel=(a,b)=>a==b?'selected':'';
+  let h=`<div class="card row"><label>Paparan<select onchange="V.mode=this.value;V.id='';render()"><option value=kelas ${sel(V.mode,'kelas')}>Jadual Kelas</option><option value=guru ${sel(V.mode,'guru')}>Jadual Guru</option></select></label>
+  <label>${V.mode=='kelas'?'Kelas':'Guru'}<select onchange="V.id=this.value;render()">${list.map(x=>`<option value=${x.id} ${sel(x.id,V.id)}>${esc(x.nama)}${x.sesi?' ('+x.sesi+')':''}</option>`).join('')}</select></label>
+  ${V.mode=='guru'?`<label>Sesi<select onchange="V.sesi=this.value;render()"><option value=pagi ${sel(V.sesi,'pagi')}>Pagi</option><option value=petang ${sel(V.sesi,'petang')}>Petang</option></select></label>`:''}
+  <button class=btn onclick="dlTT()">⬇ Muat Turun PDF</button></div>${infoH()}`;
+  if(!list.length||!sl.length)return h+`<div class=card>${admin?'Sila isi data Kelas/Guru dan Waktu Loceng dahulu.':'Jadual belum disediakan.'}</div>`;
+  return h+`<div class="card sc"><table class=tt><tr><th>Waktu</th>${H5.map(d=>`<th>${HARI[d]}</th>`).join('')}</tr>`+sl.map(s=>s.rehat?`<tr><td class=tm>${s.mula}–${s.tamat}</td><td colspan=5 class=rh>REHAT</td></tr>`:
+  `<tr><td class=tm><b>${s.slot}</b><br>${s.mula}–${s.tamat}</td>${H5.map(d=>`<td class="${admin?'ed':''}" ${admin?`onclick="openEd(${d},'${V.sesi}',${s.slot})"`:''}>${lessons(V.mode,V.id,V.sesi,d,s.slot).map(cellH).join('')}</td>`).join('')}</tr>`).join('')+`</table></div>${admin?'<p class=hint>Klik petak untuk tambah/ubah. Klik kad untuk edit waktu tersebut.</p>':''}`;
+}
+function openEd(hari,sesi,slot,lid){
+  const l=S.jadual.find(x=>x.id==lid)||{kelas_ids:V.mode=='kelas'?[V.id]:[],guru_ids:V.mode=='guru'?[V.id]:[],subjek_ids:[]};E={hari,sesi,slot,id:lid};
+  const box=(n,a,sel)=>`<fieldset><legend>${n}</legend><div class=chk>${a.map(x=>`<label class=pill style="--c:${x.warna||'#2563eb'}"><input type=checkbox name=${n} value=${x.id} ${sel.includes(x.id)?'checked':''}>${esc(x.kod?x.kod+' · '+x.nama:x.nama)}</label>`).join('')}</div></fieldset>`;
+  $('#dlg').innerHTML=`<form onsubmit="saveL(event);return false"><h3>${HARI[hari]} · Slot ${slot} · Sesi ${sesi}</h3>${box('subjek',S.subjek,l.subjek_ids)}${box('guru',S.guru,l.guru_ids)}${box('kelas',S.kelas.filter(k=>k.sesi==sesi),l.kelas_ids)}
+  <p class=hint>Pilih lebih satu subjek / guru / kelas untuk gabungan pada waktu yang sama.</p><div class=row><button class=btn>Simpan</button>${lid?'<button type=button class=danger onclick="delL()">Padam</button>':''}<button type=button class=ghost onclick="$(\'#dlg\').close()">Tutup</button></div></form>`;$('#dlg').showModal();
+}
+async function saveL(e){const f=new FormData(e.target),o={hari:E.hari,sesi:E.sesi,slot:E.slot,subjek_ids:f.getAll('subjek'),guru_ids:f.getAll('guru'),kelas_ids:f.getAll('kelas')};
+  if(!o.kelas_ids.length)return msg('Pilih sekurang-kurangnya satu kelas');
+  const same=S.jadual.filter(j=>j.id!=E.id&&j.hari==o.hari&&j.sesi==o.sesi&&j.slot==o.slot);
+  const c=[...o.guru_ids.filter(i=>same.some(j=>j.guru_ids.includes(i))).map(gn),...o.kelas_ids.filter(i=>same.some(j=>j.kelas_ids.includes(i))).map(i=>by('kelas',i).nama)];
+  if(c.length&&!confirm('⚠ Pertembungan jadual: '+c.join(', ')+'\nTeruskan juga?'))return;
+  if(E.id)o.id=E.id;const{error}=await db.from('jadual').upsert(o);error?msg(error.message):($('#dlg').close(),msg('Disimpan'),load())}
+async function delL(){if(!confirm('Padam waktu ini?'))return;await db.from('jadual').delete().eq('id',E.id);$('#dlg').close();load()}
+
+/* ---------- Guru ganti ---------- */
+function cand(l){const busy=new Set([...S.jadual.filter(j=>j.hari==l.hari&&j.sesi==l.sesi&&j.slot==l.slot).flatMap(j=>j.guru_ids),...S.ganti.filter(r=>r.tarikh==G.tarikh&&r.sesi==l.sesi&&r.slot==l.slot).flatMap(r=>[r.guru_ganti,r.guru_asal])]);
+  const free=S.guru.filter(g=>!busy.has(g.id)&&g.id!=G.guru).map(g=>[g,S.ganti.filter(r=>r.guru_ganti==g.id).length]).sort((a,b)=>a[1]-b[1]);
+  return free.length?`<select id=c${l.slot}>${free.map(([g,n])=>`<option value=${g.id}>${esc(g.nama)} (ganti ${n}x)</option>`).join('')}</select> <button class=btn onclick="lantik('${l.id}')">Lantik</button>`:'<i>Tiada guru kosong</i>'}
+function vGanti(){
+  const hari=new Date(G.tarikh+'T00:00').getDay(),rows=S.ganti.filter(x=>x.tarikh==G.tarikh&&x.sesi==G.sesi).sort((a,b)=>a.slot-b.slot),sel=(a,b)=>a==b?'selected':'';
+  let h=`<div class="card row"><label>Tarikh<input type=date value=${G.tarikh} onchange="G.tarikh=this.value;render()"></label><label>Sesi<select onchange="G.sesi=this.value;render()"><option value=pagi ${sel(G.sesi,'pagi')}>Pagi</option><option value=petang ${sel(G.sesi,'petang')}>Petang</option></select></label>
+  ${admin?`<label>Guru tidak hadir<select onchange="G.guru=this.value;render()"><option value="">-- pilih --</option>${S.guru.map(g=>`<option value=${g.id} ${sel(g.id,G.guru)}>${esc(g.nama)}</option>`).join('')}</select></label>`:''}<button class=btn onclick="dlGanti()">⬇ Muat Turun PDF</button></div>`;
+  if(admin&&G.guru){
+    if(hari<1||hari>5)h+='<div class=card>Tarikh dipilih jatuh pada hujung minggu.</div>';
+    else{const ls=S.jadual.filter(j=>j.hari==hari&&j.sesi==G.sesi&&j.guru_ids.includes(G.guru)).sort((a,b)=>a.slot-b.slot);
+      h+=`<div class="card sc"><h3>Waktu mengajar ${esc(gn(G.guru))} pada hari ${HARI[hari]}</h3>${ls.length?`<table><tr><th>Slot</th><th>Masa</th><th>Kelas</th><th>Subjek</th><th>Guru ganti (paling kurang ganti di atas)</th></tr>${ls.map(l=>{const d=rows.find(r=>r.guru_asal==G.guru&&r.slot==l.slot);return `<tr><td>${l.slot}</td><td>${tm(l.sesi,l.slot)}</td><td>${esc(kn(l))}</td><td>${esc(sn(l))}</td><td>${d?'✅ '+esc(gn(d.guru_ganti)):cand(l)}</td></tr>`}).join('')}</table>`:'Guru ini tiada kelas pada sesi/hari ini.'}</div>`}}
+  return h+`<div class="card sc"><h3>Senarai ganti: ${G.tarikh} (sesi ${G.sesi})</h3>${rows.length?`<table><tr><th>Slot</th><th>Masa</th><th>Kelas</th><th>Subjek</th><th>Tidak hadir</th><th>Guru ganti</th><th></th></tr>${rows.map(r=>`<tr><td>${r.slot}</td><td>${tm(r.sesi,r.slot)}</td><td>${esc(r.kelas)}</td><td>${esc(r.subjek)}</td><td>${esc(by('guru',r.guru_asal)?.nama)}</td><td><b>${esc(by('guru',r.guru_ganti)?.nama)}</b></td><td>${admin?`<button class=ghost onclick="delG('${r.id}')">Batal</button>`:''}</td></tr>`).join('')}</table>`:'Tiada ganti direkodkan.'}</div>`;
+}
+async function lantik(lid){const l=by('jadual',lid),{error}=await db.from('ganti').insert({tarikh:G.tarikh,sesi:G.sesi,slot:l.slot,kelas:kn(l),subjek:sn(l),guru_asal:G.guru,guru_ganti:$('#c'+l.slot).value});error?msg(error.message):(msg('Guru ganti dilantik'),load())}
+async function delG(id){await db.from('ganti').delete().eq('id',id);load()}
+
+/* ---------- PDF ---------- */
+function pdf(title,head,body,col,name){const d=new jspdf.jsPDF({orientation:'landscape'});d.setFontSize(15);d.text(S.tetapan.nama,14,14);d.setFontSize(11);d.text(title,14,21);
+  d.autoTable({startY:30,head:[head],body,styles:{fontSize:8.5,halign:'center',valign:'middle',cellPadding:2.5,lineColor:[191,219,254],lineWidth:.2},headStyles:{fillColor:[29,78,216]},
+  didParseCell(x){const c=col?.[x.row.index]?.[x.column.index];if(x.section=='body'&&c)x.cell.styles.fillColor=rgb(c)}});d.save(name)}
+function dlTT(){const item=by(V.mode,V.id);if(!item)return;const body=[],col=[];
+  slots(V.sesi).forEach(s=>{const r=[s.rehat?s.mula+'-'+s.tamat:s.slot+'\n'+s.mula+'-'+s.tamat],c=[null];
+    H5.forEach(d=>{if(s.rehat){r.push('REHAT');c.push('#fbbf24');return}const ls=lessons(V.mode,V.id,V.sesi,d,s.slot);r.push(ls.map(txt).join('\n'));c.push(ls[0]?by('subjek',ls[0].subjek_ids[0])?.warna||'#94a3b8':null)});body.push(r);col.push(c)});
+  pdf(`Jadual Waktu ${V.mode=='kelas'?'Kelas':'Guru'}: ${item.nama} (Sesi ${V.sesi})\n${infoT()}`,['Waktu',...HARI.slice(1)],body,col,`jadual-${item.nama}.pdf`)}
+function dlGanti(){const rows=S.ganti.filter(x=>x.tarikh==G.tarikh&&x.sesi==G.sesi).sort((a,b)=>a.slot-b.slot);
+  pdf(`Jadual Guru Ganti: ${G.tarikh} (Sesi ${G.sesi})`,['Slot','Masa','Kelas','Subjek','Guru Tidak Hadir','Guru Ganti'],rows.map(r=>[r.slot,tm(r.sesi,r.slot),r.kelas,r.subjek,by('guru',r.guru_asal)?.nama||'',by('guru',r.guru_ganti)?.nama||'']),null,`ganti-${G.tarikh}-${G.sesi}.pdf`)}
+
+/* ---------- Jumlah waktu ---------- */
+function stat(){const ls=S.jadual.filter(j=>(V.mode=='kelas'?j.kelas_ids:j.guru_ids).includes(V.id)),c={};ls.forEach(j=>j.subjek_ids.forEach(i=>{const n=by('subjek',i)?.kod||by('subjek',i)?.nama||'?';c[n]=(c[n]||0)+1}));return{n:ls.length,t:Object.entries(c).map(([a,b])=>a+' '+b).join(', ')}}
+const infoT=()=>{const s=stat();return `Jumlah waktu seminggu: ${s.n}`+(s.t?' ('+s.t+')':'')},infoH=()=>`<div class=card><b>${esc(infoT())}</b></div>`;
+
+/* ---------- Kad & penjana automatik ---------- */
+let JR='';
+const sesiOf=k=>by('kelas',k.kelas_ids[0])?.sesi||k.sesi||'pagi';
+function vKad(){
+  return `<div class=card><h3>Penjana Jadual Automatik</h3><p class=hint>Menyusun semua kad tanpa pertembungan guru/kelas, mengelak subjek sama pada hari sama untuk kelas yang sama. Waktu hasil janaan lama diganti; waktu yang anda isi tanpa kad dikekalkan.</p>
+  <div class=row><button class=btn onclick="jana('pagi')">⚙ Jana Sesi Pagi</button><button class=btn onclick="jana('petang')">⚙ Jana Sesi Petang</button><button class=ghost onclick="kosong()">Kosongkan hasil janaan</button></div>${JR}</div>
+  <div class=card><h3>Kad Mata Pelajaran (${S.kad.length})</h3><button class=btn onclick="kadEd()">+ Kad Baharu</button></div>
+  <div class="card sc"><table><tr><th>Subjek</th><th>Guru</th><th>Kelas</th><th>Susunan</th><th>Jum. waktu</th><th></th></tr>${S.kad.map(k=>{const s=by('subjek',k.subjek_id);return `<tr><td><span class=pill style="--c:${s?.warna||'#94a3b8'};padding:2px 8px">${esc(s?.nama)}</span></td><td>${esc(k.guru_ids.map(gn).join(', '))}</td><td>${esc(k.kelas_ids.map(i=>by('kelas',i)?.nama).join(', '))}</td><td>${k.bilangan} kad × ${k.panjang} waktu${k.panjang>1?' bergabung':''}</td><td>${k.bilangan*k.panjang}</td><td><button class=ghost onclick="kadEd('${k.id}')">Edit</button> <button class=ghost onclick="dl('kad','${k.id}')">Padam</button></td></tr>`}).join('')}</table></div>
+  <div class="card sc"><h3>Beban Waktu Guru</h3><table><tr><th>Guru</th><th>Waktu / minggu</th></tr>${S.guru.map(g=>`<tr><td>${esc(g.nama)}</td><td>${S.jadual.filter(j=>j.guru_ids.includes(g.id)).length}</td></tr>`).join('')}</table></div>`}
+function kadEd(id){const k=S.kad.find(x=>x.id==id)||{guru_ids:[],kelas_ids:[],panjang:1,bilangan:1},
+  bx=(n,a,s)=>`<fieldset><legend>${n}</legend><div class=chk>${a.map(x=>`<label class=pill style="--c:${x.warna||'#2563eb'}"><input type=checkbox name=${n} value=${x.id} ${s.includes(x.id)?'checked':''}>${esc((x.kod?x.kod+' · ':'')+x.nama+(x.sesi?' ('+x.sesi+')':''))}</label>`).join('')}</div></fieldset>`,
+  op=(m,v)=>[1,2,3,4,5].slice(0,m).map(i=>`<option ${i==v?'selected':''}>${i}</option>`).join('');
+  $('#dlg').innerHTML=`<form onsubmit="svKad(event,'${id||''}');return false"><h3>Kad Mata Pelajaran</h3><label>Subjek<select name=subjek>${S.subjek.map(s=>`<option value=${s.id} ${s.id==k.subjek_id?'selected':''}>${esc(s.nama)}</option>`).join('')}</select></label><br>${bx('guru',S.guru,k.guru_ids)}${bx('kelas',S.kelas,k.kelas_ids)}
+  <div class=row><label>Bilangan kad seminggu<select name=bil>${op(5,k.bilangan)}</select></label><label>Panjang kad (waktu bergabung)<select name=pj>${op(3,k.panjang)}</select></label></div>
+  <p class=hint>Cth: 1 kad × 2 waktu = satu sesi 2 waktu bergabung. 2 kad × 1 waktu = dua sesi berasingan. Pilih beberapa guru/kelas untuk gabungan.</p><div class=row><button class=btn>Simpan</button><button type=button class=ghost onclick="$('#dlg').close()">Tutup</button></div></form>`;$('#dlg').showModal()}
+async function svKad(e,id){const f=new FormData(e.target),o={subjek_id:f.get('subjek'),guru_ids:f.getAll('guru'),kelas_ids:f.getAll('kelas'),bilangan:+f.get('bil'),panjang:+f.get('pj')};
+  if(!o.kelas_ids.length)return msg('Pilih sekurang-kurangnya satu kelas');const ss=[...new Set(o.kelas_ids.map(i=>by('kelas',i).sesi))];if(ss.length>1)return msg('Semua kelas dalam satu kad mesti sesi yang sama');
+  o.sesi=ss[0];if(id)o.id=id;const{error}=await db.from('kad').upsert(o);error?msg(error.message):($('#dlg').close(),msg('Disimpan'),load())}
+async function kosong(){if(!confirm('Padam semua waktu hasil janaan?'))return;await db.from('jadual').delete().not('kad_id','is',null);JR='';load()}
+function attempt(units,runs,fixed,sesi){
+  const busy=new Set(),cnt={},out=[],fail=[],K=(a,b,c)=>a+'|'+b+'|'+c;
+  fixed.forEach(j=>[...j.guru_ids,...j.kelas_ids].forEach(i=>busy.add(K(i,j.hari,j.slot))));
+  const dif=u=>u.k.panjang*(u.k.guru_ids.length+u.k.kelas_ids.length)+Math.random()*3;
+  units.map(u=>({u,d:dif(u)})).sort((a,b)=>b.d-a.d).forEach(({u})=>{const k=u.k,L=k.panjang,ids=[...k.guru_ids,...k.kelas_ids];let bp=null,bs=1e9;
+    for(const h of H5)for(const run of runs)for(let i=0;i+L<=run.length;i++){const ss=run.slice(i,i+L);if(ids.some(id=>ss.some(s=>busy.has(K(id,h,s)))))continue;
+      let sc=Math.random()*2+ss[0]*.2;k.kelas_ids.forEach(c=>{sc+=(cnt[K(c,k.subjek_id,h)]||0)*10+(cnt[K(c,'x',h)]||0)*.4});k.guru_ids.forEach(g=>sc+=(cnt[K(g,'x',h)]||0)*.5);sc+=(cnt[K(k.id,'k',h)]||0)*8;
+      if(sc<bs){bs=sc;bp={h,ss}}}
+    if(!bp){fail.push(k);return}
+    bp.ss.forEach(s=>{ids.forEach(id=>busy.add(K(id,bp.h,s)));out.push({hari:bp.h,sesi,slot:s,kelas_ids:k.kelas_ids,guru_ids:k.guru_ids,subjek_ids:[k.subjek_id],kad_id:k.id})});
+    k.kelas_ids.forEach(c=>{cnt[K(c,k.subjek_id,bp.h)]=(cnt[K(c,k.subjek_id,bp.h)]||0)+L;cnt[K(c,'x',bp.h)]=(cnt[K(c,'x',bp.h)]||0)+L});k.guru_ids.forEach(g=>cnt[K(g,'x',bp.h)]=(cnt[K(g,'x',bp.h)]||0)+L);cnt[K(k.id,'k',bp.h)]=1});
+  return{out,fail}}
+async function jana(sesi){
+  const runs=[];let cur=[];slots(sesi).forEach(b=>{if(b.rehat){if(cur.length)runs.push(cur);cur=[]}else cur.push(b.slot)});if(cur.length)runs.push(cur);
+  if(!runs.length)return msg('Tetapkan waktu loceng sesi ini dahulu');
+  const units=S.kad.filter(k=>sesiOf(k)==sesi).flatMap(k=>Array.from({length:k.bilangan},()=>({k})));if(!units.length)return msg('Tiada kad untuk sesi ini');
+  const fixed=S.jadual.filter(j=>j.sesi==sesi&&!j.kad_id);msg('Sedang menjana...');await new Promise(r=>setTimeout(r,50));
+  let best=null;for(let t=0;t<40;t++){const r=attempt(units,runs,fixed,sesi);if(!best||r.fail.length<best.fail.length)best=r;if(!r.fail.length)break}
+  if(best.fail.length&&!confirm(`${best.fail.length} unit kad tidak dapat ditempatkan. Simpan juga yang berjaya?`))return;
+  await db.from('jadual').delete().eq('sesi',sesi).not('kad_id','is',null);
+  for(let i=0;i<best.out.length;i+=500){const{error}=await db.from('jadual').insert(best.out.slice(i,i+500));if(error)return msg(error.message)}
+  JR=`<p><b>Sesi ${sesi}:</b> ${best.out.length} waktu disusun. ${best.fail.length?'<span style="color:#b91c1c">Gagal ('+best.fail.length+'): '+esc(best.fail.map(k=>(by('subjek',k.subjek_id)?.nama||'')+' '+k.kelas_ids.map(i=>by('kelas',i)?.nama).join('+')).join('; '))+'. Kurangkan bilangan/panjang kad atau tambah waktu.</span>':'✅ Semua kad berjaya ditempatkan.'}</p>`;
+  msg('Siap');await load()}
+
+db.auth.onAuthStateChange((_,s)=>{admin=!!s;render()});
+db.auth.getSession().then(({data})=>{admin=!!data.session;load()});
+</script></body></html>
