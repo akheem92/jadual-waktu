@@ -131,9 +131,9 @@ const CFG = {
       { k: 'start_time', label: 'Masa Mula', t: 'time', req: 1 },
       { k: 'end_time', label: 'Masa Tamat', t: 'time', req: 1 },
       { k: 'is_recess', label: 'Waktu Rehat', t: 'check' },
-      { k: 'recess_level', label: 'Tahap Rehat (jika rehat, cth: Semua / Rendah / Menengah)' }
+      { k: 'recess_level', label: 'Tahap / Tahun (cth: 4,5 atau 6 atau 1-3). Kosong = semua tahun' }
     ],
-    pre: o => { o.session_type = sess(); if (!o.is_recess) o.recess_level = null; if (o.start_time >= o.end_time) throw new Error('Masa tamat mesti selepas masa mula'); },
+    pre: o => { o.session_type = sess(); if (o.recess_level && !lvSet(o.recess_level)) throw new Error('Tahap tidak sah (cth: 4,5 atau 1-3)'); if (o.start_time >= o.end_time) throw new Error('Masa tamat mesti selepas masa mula'); },
     list: 'bells'
   },
   teachers: {
@@ -240,10 +240,10 @@ function renderT1() {
         <div class="flex gap-2"><button data-act="genBells" class="${BTNA}">Jana Waktu Loceng Piawai</button><button data-act="add" data-t="bell_schedules" class="${BTNG}">+ Waktu</button></div>
       </div>
       <div class="overflow-x-auto"><table class="w-full text-sm">
-        <thead class="text-xs text-slate-500 text-left"><tr><th class="py-1">#</th><th>Label</th><th>Mula</th><th>Tamat</th><th>Rehat</th><th></th></tr></thead>
+        <thead class="text-xs text-slate-500 text-left"><tr><th class="py-1">#</th><th>Label</th><th>Mula</th><th>Tamat</th><th>Rehat / Tahap</th><th></th></tr></thead>
         <tbody>${bells.map(b => `<tr class="border-t border-slate-800 ${b.is_recess ? 'bg-amber-500/10' : ''}">
           <td class="py-1.5 text-cyan-400 font-bold">${b.period_number}</td><td>${esc(b.label)}</td><td>${hhmm(b.start_time)}</td><td>${hhmm(b.end_time)}</td>
-          <td>${b.is_recess ? `<span class="text-amber-400 text-xs">${esc(b.recess_level || 'Rehat')}</span>` : ''}</td>
+          <td class="text-xs"><span class="text-amber-400">${b.is_recess ? 'Rehat ' : ''}</span><span class="text-cyan-300">${b.recess_level ? 'Thn ' + esc(b.recess_level) : 'Semua'}</span></td>
           <td class="text-right whitespace-nowrap"><button data-act="edit" data-t="bell_schedules" data-id="${b.id}" class="${BTNE}">Edit</button><button data-act="del" data-t="bell_schedules" data-id="${b.id}" class="${BTND}">Padam</button></td></tr>`).join('') || '<tr><td colspan="6" class="py-4 text-center text-slate-500">Tiada waktu loceng. Klik "Jana Waktu Loceng Piawai".</td></tr>'}</tbody>
       </table></div>
     </div>
@@ -415,7 +415,7 @@ window.addEventListener('DOMContentLoaded', async () => {
    FASA 2: TAB 4 (PAPAN JADUAL + ENJIN AUTO-GENERATE) & TAB 6 (CETAKAN)
    ===================================================================== */
 Object.assign(S, { slots: [], view: 'class', sel: null, drag: null, hov: null, report: null, pMode: 'teacher', pScope: 'one', pId: '' });
-const bellsOf = () => S.bells.filter(b => b.session_type === sess()).sort((a, b) => a.period_number - b.period_number);
+const bellsOf = () => { const m = new Map(); S.bells.filter(b => b.session_type === sess()).sort((a, b) => a.period_number - b.period_number).forEach(b => { const o = m.get(b.period_number); if (!o || (lvSet(o.recess_level) && !lvSet(b.recess_level))) m.set(b.period_number, b); }); return [...m.values()]; };
 const daysList = () => (Array.isArray(S.settings?.days_of_week) && S.settings.days_of_week.length ? S.settings.days_of_week : DEFAULT_DAYS);
 const sSlots = () => S.slots.filter(x => x.session_type === sess());
 const tCodes = ids => (ids || []).map(i => byId(S.teachers, i)?.short_code || '?').join('+');
@@ -446,9 +446,13 @@ function clashScan(slots) {
   const ids = new Set(), list = [], g = {}, rec = new Set(bellsOf().filter(b => b.is_recess).map(b => b.period_number));
   slots.forEach(s => {
     (g[s.day_name + '|' + s.period_number] ||= []).push(s);
-    if (rec.has(s.period_number)) { ids.add(s.id); list.push(`${s.day_name} W${s.period_number}: slot jatuh pada waktu rehat`); }
+    if (cellKind(s.session_type, s.period_number, ylOf(s.class_ids)) !== 'T') { ids.add(s.id); list.push(`${s.day_name} W${s.period_number}: slot jatuh pada waktu rehat`); }
   });
   for (const k in g) { const a = g[k]; for (let i = 0; i < a.length; i++) for (let j = i + 1; j < a.length; j++) { const c = clashPair(a[i], a[j]); if (c) { ids.add(a[i].id); ids.add(a[j].id); list.push(`${k.replace('|', ' W')}: ${c.type} ${c.who} bertindih`); } } }
+  if (S.bells.some(b => b.session_type === sess() && lvSet(b.recess_level))) {
+    const cm = {}, cfx = p => cm[p] ||= confOf(sess(), p);
+    for (const a of slots) for (const b of slots) if (a.day_name === b.day_name && a.period_number < b.period_number && cfx(a.period_number).has(b.period_number)) { const c = slotClash(a, b); if (c) { ids.add(a.id); ids.add(b.id); list.push(`${a.day_name} W${a.period_number}/W${b.period_number}: ${c.type} ${c.who} bertindih`); } }
+  }
   return { ids, list };
 }
 const unitOf = s => s.concurrent_group_tag ? S.slots.filter(x => x.session_type === s.session_type && x.day_name === s.day_name && x.period_number === s.period_number && x.concurrent_group_tag === s.concurrent_group_tag) : [s];
@@ -458,17 +462,16 @@ function planMove(sid, day, p) {
   if (s.day_name === day && s.period_number === p) return { ok: false, msg: '' };
   const U = unitOf(s);
   if (U.some(x => x.is_locked)) return { ok: false, msg: 'Slot dikunci (Freeze) — buka kunci dahulu' };
-  const b = bellsOf().find(x => x.period_number === p);
-  if (!b || b.is_recess) return { ok: false, msg: 'Tidak boleh diletakkan pada waktu rehat' };
-  const inU = new Set(U.map(x => x.id)), at = (d, q) => sSlots().filter(x => x.day_name === d && x.period_number === q);
-  const C = at(day, p).filter(t => !inU.has(t.id) && U.some(u => clashPair(u, t)));
+  if (U.some(u => cellKind(s.session_type, p, ylOf(u.class_ids)) !== 'T')) return { ok: false, msg: 'Waktu rehat / tiada waktu untuk tahap kelas ini' };
+  const inU = new Set(U.map(x => x.id)), at = (d, q) => { const cf = confOf(sess(), q); return sSlots().filter(x => x.day_name === d && cf.has(x.period_number)); };
+  const C = at(day, p).filter(t => !inU.has(t.id) && U.some(u => slotClash(u, t)));
   const moves = U.map(u => ({ id: u.id, day_name: day, period_number: p }));
   if (!C.length) return { ok: true, moves };
-  const f = U.map(u => clashPair(u, C[0])).find(Boolean), why = `${f.type} ${f.who} bertindih`;
+  const f = U.map(u => slotClash(u, C[0])).find(Boolean), why = `${f.type} ${f.who} bertindih`;
   const V = [...new Map(C.flatMap(unitOf).map(x => [x.id, x])).values()];
   if (V.some(x => x.is_locked)) return { ok: false, msg: why + ' (slot sasaran dikunci)' };
   const inV = new Set(V.map(x => x.id)), rest = at(s.day_name, s.period_number).filter(x => !inU.has(x.id) && !inV.has(x.id));
-  if (V.some(v => rest.some(r => clashPair(v, r)))) return { ok: false, msg: why + '; pertukaran juga akan menyebabkan pertindihan' };
+  if (V.some(v => rest.some(r => slotClash(v, r)))) return { ok: false, msg: why + '; pertukaran juga akan menyebabkan pertindihan' };
   return { ok: true, swap: true, moves: [...moves, ...V.map(v => ({ id: v.id, day_name: s.day_name, period_number: s.period_number }))] };
 }
 async function applyMoves(moves) {
@@ -484,7 +487,7 @@ async function applyMoves(moves) {
 
 /* ---------- Enjin Auto-Generate (heuristik CSP + percubaan rawak berulang) ---------- */
 function genSchedule(assigns, locked, tries = 40) {
-  const days = daysList(), per = bellsOf().filter(b => !b.is_recess).map(b => b.period_number), isT = new Set(per);
+  const days = daysList(), per = bellsOf().map(b => b.period_number), cfm = {}, cf = q => cfm[q] ||= [...confOf(sess(), q)];
   const lbl = u => u.members.map(m => `${byId(S.subjects, m.a.subject_id)?.subject_code || '?'} (${tCodes(m.a.teacher_ids)} → ${cNames(m.a.class_ids)})`).join(' / ');
   const blocksFor = a => {
     let bl = String(a.period_split || a.periods_per_week).split('+').map(Number).filter(Boolean);
@@ -521,7 +524,7 @@ function genSchedule(assigns, locked, tries = 40) {
       let bs = Infinity, bc = null;
       for (const d of days) for (const p of per) {
         let ok = true;
-        for (let j = 0; j < n && ok; j++) { const q = p + j, k = d + '|' + q; if (!isT.has(q) || tch.some(t => busy(tb, t, k)) || cls.some(c => busy(cb, c, k))) ok = false; }
+        for (let j = 0; j < n && ok; j++) { const q = p + j, k = d + '|' + q; if (cls.some(c => cellKind(sess(), q, byId(S.classes, c)?.year_level) !== 'T') || tch.some(t => cf(q).some(pq => busy(tb, t, d + '|' + pq))) || cls.some(c => busy(cb, c, k))) ok = false; }
         if (!ok) continue;
         const idx = per.indexOf(p); let sc = Math.random() * (it ? 4 : .5) + idx * .15;
         cls.forEach(c => { sc += (dl[c + d] || 0) * 1.5; u.members.forEach(m => { if (m.a.class_ids.includes(c)) sc += (sd[c + '|' + m.a.subject_id + '|' + d] || 0) * (n > 1 ? 2 : 12); }); });
@@ -553,7 +556,7 @@ function renderT4() {
   const bells = bellsOf(), days = daysList(), slots = sSlots(), cl = clashScan(slots), T = S.view === 'teacher';
   const sb_ = v => `class="px-3 py-1.5 ${S.view === v ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400'}"`;
   const rows = T ? S.teachers.filter(t => t.session_type === sess() || t.session_type === 'Kedua-dua').map(t => ({ id: t.id, name: t.short_code, sub: t.name }))
-    : S.classes.filter(c => c.session_type === sess()).map(c => ({ id: c.id, name: c.class_name, sub: '' }));
+    : S.classes.filter(c => c.session_type === sess()).map(c => ({ id: c.id, name: c.class_name, sub: '', yl: c.year_level }));
   const idx = {}; slots.forEach(s => (T ? s.teacher_ids : s.class_ids || []).forEach(r => (idx[`${r}|${s.day_name}|${s.period_number}`] ||= []).push(s)));
   const card = s => {
     const sub = byId(S.subjects, s.subject_id), col = sub?.color_hex || '#64748b', bad = cl.ids.has(s.id);
@@ -573,9 +576,9 @@ function renderT4() {
       <ul class="list-disc ml-5 mt-1">${rp.unplaced.map(x => `<li>Tidak dapat ditempatkan: ${esc(x)}</li>`).join('')}${rp.over.map(x => `<li>Melebihi had waktu: ${esc(x)}</li>`).join('')}</ul></details>` : ''}
     ${bells.length ? `<div class="overflow-auto max-h-[70vh] border border-slate-800 rounded-lg"><table class="border-collapse text-xs">
       <thead class="sticky top-0 z-20 bg-slate-900"><tr><th rowspan="2" class="sticky left-0 z-30 bg-slate-900 border border-slate-800 p-2 min-w-[90px]">${T ? 'Guru' : 'Kelas'}</th>${days.map(d => `<th colspan="${bells.length}" class="border border-slate-700 border-l-2 border-l-cyan-400/50 py-1 text-cyan-300">${esc(d)}</th>`).join('')}</tr>
-      <tr>${days.map(() => bells.map(b => `<th title="${hhmm(b.start_time)}–${hhmm(b.end_time)}" class="border border-slate-800 py-0.5 text-slate-400 ${b.is_recess ? 'bg-amber-500/10 text-amber-400' : ''}">${b.is_recess ? 'R' : b.period_number}</th>`).join('')).join('')}</tr></thead>
+      <tr>${days.map(() => bells.map(b => `<th title="${esc(varTitle(b.period_number))}" class="border border-slate-800 py-0.5 text-slate-400 ${b.is_recess ? 'bg-amber-500/10 text-amber-400' : ''}">${b.is_recess ? 'R' : b.period_number}</th>`).join('')).join('')}</tr></thead>
       <tbody>${rows.map(r => `<tr><td class="sticky left-0 z-10 bg-slate-900 border border-slate-800 px-2 py-1 font-semibold whitespace-nowrap">${esc(r.name)}<div class="text-[9px] font-normal text-slate-500 max-w-[110px] truncate">${esc(r.sub)}</div></td>
-        ${days.map(d => bells.map(b => b.is_recess ? `<td class="border border-slate-800 bg-amber-500/10 w-5"></td>` : `<td data-d="${esc(d)}" data-p="${b.period_number}" class="border border-slate-800 align-top p-0.5 min-w-[58px] ${b.period_number === bells[0].period_number ? 'border-l-2 border-l-cyan-400/30' : ''}">${(idx[`${r.id}|${d}|${b.period_number}`] || []).map(card).join('')}</td>`).join('')).join('')}</tr>`).join('') || '<tr><td class="p-4 text-slate-500">Tiada data baris untuk sesi ini.</td></tr>'}</tbody></table></div>`
+        ${days.map(d => bells.map(b => cellKind(sess(), b.period_number, r.yl) !== 'T' ? `<td class="border border-slate-800 ${cellKind(sess(), b.period_number, r.yl) === 'X' ? 'bg-slate-950' : 'bg-amber-500/10'} w-5"></td>` : `<td data-d="${esc(d)}" data-p="${b.period_number}" class="border border-slate-800 align-top p-0.5 min-w-[58px] ${b.period_number === bells[0].period_number ? 'border-l-2 border-l-cyan-400/30' : ''}">${(idx[`${r.id}|${d}|${b.period_number}`] || []).map(card).join('')}</td>`).join('')).join('')}</tr>`).join('') || '<tr><td class="p-4 text-slate-500">Tiada data baris untuk sesi ini.</td></tr>'}</tbody></table></div>`
       : '<div class="text-slate-500 text-sm py-6 text-center">Tetapkan Waktu Loceng di Tab 1 dahulu.</div>'}</div>`;
 }
 Object.assign(ACT, {
@@ -642,9 +645,9 @@ document.addEventListener('click', e => {
   document.head.appendChild(st);
 })();
 function pageHtml(e) {
-  const s = S.settings || {}, bells = bellsOf(), days = daysList(), T = S.pMode === 'teacher', slots = sSlots().filter(x => (T ? x.teacher_ids : x.class_ids || []).includes(e.id));
-  const head = `<tr><th class="d">HARI</th>${bells.map(b => b.is_recess ? `<th class="rc">${esc(b.label)}</th>` : `<th><b>${esc(b.label)}</b><br><small>${hhmm(b.start_time)}–${hhmm(b.end_time)}</small></th>`).join('')}</tr>`;
-  const body = days.map(d => `<tr><td class="d">${esc(d)}</td>${bells.map(b => b.is_recess ? '<td class="rc"></td>' : `<td><div class="cell">${slots.filter(x => x.day_name === d && x.period_number === b.period_number).map(x => { const sub = byId(S.subjects, x.subject_id); return `<div class="sl" style="background:${esc(sub?.color_hex || '#ccc')}2e"><b>${esc(sub?.subject_code || '?')}</b><i class="cl">${esc(cNames(x.class_ids))}</i><i class="tc">${esc(tCodes(x.teacher_ids).replace(/\+/g, '/'))}</i></div>`; }).join('')}</div></td>`).join('')}</tr>`).join('');
+  const s = S.settings || {}, bells = bellsOf(), days = daysList(), T = S.pMode === 'teacher', yl = S.pMode === 'teacher' ? null : byId(S.classes, e.id)?.year_level, slots = sSlots().filter(x => (T ? x.teacher_ids : x.class_ids || []).includes(e.id));
+  const head = `<tr><th class="d">HARI</th>${bells.map(b => hdrCell(b, yl)).join('')}</tr>`;
+  const body = days.map(d => `<tr><td class="d">${esc(d)}</td>${bells.map(b => cellKind(sess(), b.period_number, yl) === 'R' ? '<td class="rc"></td>' : `<td><div class="cell">${slots.filter(x => x.day_name === d && x.period_number === b.period_number).map(x => { const sub = byId(S.subjects, x.subject_id); return `<div class="sl" style="background:${esc(sub?.color_hex || '#ccc')}2e"><b>${esc(sub?.subject_code || '?')}</b><i class="cl">${esc(cNames(x.class_ids))}</i><i class="tc">${esc(tCodes(x.teacher_ids).replace(/\+/g, '/'))}</i></div>`; }).join('')}</div></td>`).join('')}</tr>`).join('');
   let sum = '';
   if (T) {
     let tot = 0;
@@ -696,12 +699,12 @@ loadAll = async function () {
 };
 
 /* ---------- Enjin kelayakan & cadangan ---------- */
-const tspan = (sn, p) => { const b = S.bells.find(x => x.session_type === sn && x.period_number === p); return b ? [hhmm(b.start_time), hhmm(b.end_time)] : null; };
-const overlap = (s1, p1, s2, p2) => { const a = tspan(s1, p1), b = tspan(s2, p2); return a && b ? a[0] < b[1] && b[0] < a[1] : s1 === s2 && p1 === p2; };
+const tspan = (sn, p, yl) => { const b = bellFor(sn, p, yl); return b ? [hhmm(b.start_time), hhmm(b.end_time)] : null; };
+const overlap = (s1, p1, s2, p2, y1, y2) => { const a = tspan(s1, p1, y1), b = tspan(s2, p2, y2); return a && b ? a[0] < b[1] && b[0] < a[1] : s1 === s2 && p1 === p2; };
 const findSlot = r => S.slots.find(s => s.session_type === r.session_type && s.day_name === r.day_name && s.period_number === r.period_number && (s.teacher_ids || []).includes(r.absent_teacher_id));
 function relBusy(tid, r) { // bertindih masa dengan jadual tetap (mana-mana sesi) atau relief lain pada tarikh sama
-  return S.slots.some(s => s.day_name === r.day_name && (s.teacher_ids || []).includes(tid) && overlap(s.session_type, s.period_number, r.session_type, r.period_number))
-    || S.reliefs.some(x => x.id !== r.id && x.relief_teacher_id === tid && x.status !== 'Tidak Perlu' && x.leave_date === r.leave_date && overlap(x.session_type, x.period_number, r.session_type, r.period_number));
+  return S.slots.some(s => s.day_name === r.day_name && (s.teacher_ids || []).includes(tid) && overlap(s.session_type, s.period_number, r.session_type, r.period_number, ylOf(s.class_ids), rYl(r)))
+    || S.reliefs.some(x => x.id !== r.id && x.relief_teacher_id === tid && x.status !== 'Tidak Perlu' && x.leave_date === r.leave_date && overlap(x.session_type, x.period_number, r.session_type, r.period_number, rYl(x), rYl(r)));
 }
 function relCands(r) {
   const slot = findSlot(r), cls = slot?.class_ids || [], [ws, we] = weekRange(r.leave_date);
@@ -724,7 +727,7 @@ async function setRelief(id, tid, quiet) {
 
 /* ---------- Paparan Tab 5 ---------- */
 const reliefRows = () => S.reliefs.filter(r => r.leave_date === S.rDate && r.session_type === S.rSess).sort((a, b) => tn(a.absent_teacher_id).localeCompare(tn(b.absent_teacher_id)) || a.period_number - b.period_number);
-const wktLabel = (sn, p) => { const b = S.bells.find(x => x.session_type === sn && x.period_number === p); return b ? `${b.label} (${hhmm(b.start_time)}–${hhmm(b.end_time)})` : 'Waktu ' + p; };
+const wktLabel = (sn, p, yl) => { const b = bellFor(sn, p, yl); return b ? `${b.label} (${hhmm(b.start_time)}–${hhmm(b.end_time)})` : 'Waktu ' + p; };
 function renderT5() {
   const el = $('#relief-container'); if (!el) return;
   const day = dayOf(S.rDate), valid = daysList().includes(day);
@@ -736,7 +739,7 @@ function renderT5() {
     const slot = findSlot(r), comp = (slot?.teacher_ids || []).filter(t => t !== r.absent_teacher_id && !absentDate.has(t)), skip = r.status === 'Tidak Perlu';
     const opts = skip ? '' : `<option value="">— Pilih guru ganti —</option>` + relCands(r).map(c => `<option value="${c.t.id}" ${c.t.id === r.relief_teacher_id ? 'selected' : ''}>${esc(c.t.name)} (Waktu Hari Ini: ${c.dayLoad} | Relief Minggu Ini: ${c.wk}/${c.max || '∞'})${c.match ? ' ★' : ''}${c.over ? ' ⚠ had' : ''}</option>`).join('');
     return `<tr class="border-t border-slate-800 align-top ${skip ? 'opacity-50' : ''}"><td class="py-2 pr-2"><b>${esc(tn(r.absent_teacher_id))}</b><div class="text-[10px] text-pink-400">${esc(reasonOf(r.leave_id))}</div></td>
-      <td class="pr-2 whitespace-nowrap">${esc(wktLabel(r.session_type, r.period_number))}</td><td class="pr-2">${esc(r.class_names)}</td><td class="pr-2">${esc(r.subject_code)}</td>
+      <td class="pr-2 whitespace-nowrap">${esc(wktLabel(r.session_type, r.period_number, rYl(r)))}</td><td class="pr-2">${esc(r.class_names)}</td><td class="pr-2">${esc(r.subject_code)}</td>
       <td class="pr-2">${comp.length ? `<span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] whitespace-nowrap">Ada Guru Pendamping: ${esc(tCodes(comp))}</span>` : ''}</td>
       <td class="pr-2">${skip ? '<span class="text-xs text-slate-500">Tidak perlu ganti</span>' : `<select data-rsel="${r.id}" class="${INP} !w-72 !py-1">${opts}</select>`}</td>
       <td class="whitespace-nowrap">${skip ? '' : `<button data-act="rSuggest" data-id="${r.id}" class="${BTNA}">Cadang Automatik</button> `}<button data-act="rNone" data-id="${r.id}" class="${BTNE}">${skip ? 'Batal' : 'Tak perlu'}</button></td></tr>`;
@@ -764,7 +767,7 @@ function reliefPage(rows) {
     <div><div class="cap">SENARAI JADUAL GURU GANTI HARIAN</div><div class="big" style="font-size:20pt">${esc(dayOf(S.rDate))}, ${fdate(S.rDate)}</div></div></div>
     <table class="sum" style="margin-top:0"><thead><tr><th style="width:10mm">Bil</th><th>Guru Tidak Hadir</th><th>Waktu / Masa</th><th>Kelas</th><th>Subjek</th><th>Guru Ganti</th><th style="width:38mm">Tandatangan Makluman</th></tr></thead><tbody>
     ${list.map((r, i) => { const sub = S.subjects.find(x => x.subject_code === r.subject_code); const l = S.leaves.find(x => x.id === r.leave_id);
-      return `<tr style="height:11mm"><td>${i + 1}</td><td>${esc(tn(r.absent_teacher_id))}${l?.reason ? ` <small>(${esc(l.reason)})</small>` : ''}</td><td>${esc(wktLabel(r.session_type, r.period_number))}</td><td>${esc(r.class_names)}</td><td>${esc(r.subject_code || '')}${sub ? ' <small>' + esc(sub.subject_name) + '</small>' : ''}</td><td><b>${r.relief_teacher_id ? esc(tn(r.relief_teacher_id)) : '—'}</b></td><td></td></tr>`; }).join('')}</tbody></table>
+      return `<tr style="height:11mm"><td>${i + 1}</td><td>${esc(tn(r.absent_teacher_id))}${l?.reason ? ` <small>(${esc(l.reason)})</small>` : ''}</td><td>${esc(wktLabel(r.session_type, r.period_number, rYl(r)))}</td><td>${esc(r.class_names)}</td><td>${esc(r.subject_code || '')}${sub ? ' <small>' + esc(sub.subject_name) + '</small>' : ''}</td><td><b>${r.relief_teacher_id ? esc(tn(r.relief_teacher_id)) : '—'}</b></td><td></td></tr>`; }).join('')}</tbody></table>
     <div class="sig"><div><div class="ln">Penyelaras Guru Ganti</div>&nbsp;</div><div><div class="ln">Disahkan: Guru Besar / Penolong Kanan</div>&nbsp;</div></div></div>`;
 }
 function waText() {
@@ -773,7 +776,7 @@ function waText() {
   let t = `📋 *JADUAL GURU GANTI*\n🏫 ${S.settings?.school_name || ''}\n📅 ${dayOf(S.rDate)}, ${fdate(S.rDate)} | Sesi ${S.rSess}\n`;
   for (const id in g) {
     t += `\n👤 *${tn(id)}* (${S.leaves.find(l => l.id === g[id][0].leave_id)?.reason || 'Tidak hadir'})\n`;
-    g[id].forEach(r => { const b = tspan(r.session_type, r.period_number); t += `• W${r.period_number}${b ? ` (${b[0]}-${b[1]})` : ''} | ${r.class_names} | ${r.subject_code || ''} ➜ *${r.relief_teacher_id ? tn(r.relief_teacher_id) : 'BELUM DITETAPKAN'}*\n`; });
+    g[id].forEach(r => { const b = tspan(r.session_type, r.period_number, rYl(r)); t += `• W${r.period_number}${b ? ` (${b[0]}-${b[1]})` : ''} | ${r.class_names} | ${r.subject_code || ''} ➜ *${r.relief_teacher_id ? tn(r.relief_teacher_id) : 'BELUM DITETAPKAN'}*\n`; });
   }
   return t + '\n_Sila maklum dan laksanakan. Terima kasih._ 🙏';
 }
@@ -824,3 +827,34 @@ document.addEventListener('change', e => {
   const k = e.target.dataset?.rl, id = e.target.dataset?.rsel;
   if (k) { S[k] = e.target.value; renderT5(); } else if (id) setRelief(id, e.target.value || null);
 });
+
+
+/* =====================================================================
+   WAKTU LOCENG BERBEZA MENGIKUT TAHAP (no. waktu boleh bertindih)
+   Lajur `recess_level` digunakan sebagai skop tahap: "4,5" / "6" / "1-3"; kosong = semua tahun.
+   ===================================================================== */
+function lvSet(sc) { if (!sc) return null; const s = new Set(); String(sc).replace(/(\d+)\s*[-–]\s*(\d+)/g, (m, a, b) => { for (let i = +a; i <= +b; i++) s.add(i); return ' '; }).replace(/\d+/g, d => { s.add(+d); return ''; }); return s.size ? s : null; }
+function ylOf(ids) { return byId(S.classes, (ids || [])[0])?.year_level ?? null; }
+function bellFor(sn, p, yl) { const rs = S.bells.filter(b => b.session_type === sn && b.period_number === p); return rs.find(b => { const l = lvSet(b.recess_level); return l && yl != null && l.has(+yl); }) || rs.find(b => !lvSet(b.recess_level)) || (yl == null ? rs[0] : null) || null; }
+function cellKind(sn, p, yl) { // T = mengajar, R = rehat, X = tiada waktu untuk tahap ini
+  if (yl == null) { const rs = S.bells.filter(b => b.session_type === sn && b.period_number === p); return !rs.length ? 'X' : rs.every(b => b.is_recess) ? 'R' : 'T'; }
+  const b = bellFor(sn, p, yl); return !b ? 'X' : b.is_recess ? 'R' : 'T';
+}
+function varTitle(p) { return S.bells.filter(b => b.session_type === sess() && b.period_number === p).map(b => `${b.recess_level ? 'Thn ' + b.recess_level : 'Semua'}: ${hhmm(b.start_time)}–${hhmm(b.end_time)}${b.is_recess ? ' (Rehat)' : ''}`).join('\n'); }
+function confOf(sn, p) { // no. waktu yang bertindih MASA dengan waktu p (merentas tahap)
+  const rs = S.bells.filter(b => b.session_type === sn && !b.is_recess), out = new Set([p]);
+  rs.filter(b => b.period_number === p).forEach(x => rs.forEach(y => { if (y.period_number !== p && hhmm(x.start_time) < hhmm(y.end_time) && hhmm(y.start_time) < hhmm(x.end_time)) out.add(y.period_number); }));
+  return out;
+}
+function slotClash(a, b) {
+  if (a.period_number === b.period_number) return clashPair(a, b);
+  const t = (a.teacher_ids || []).filter(x => (b.teacher_ids || []).includes(x));
+  return t.length ? { type: 'Guru (masa bertindih)', who: tCodes(t) } : null;
+}
+function hdrCell(b, yl) {
+  const rs = S.bells.filter(x => x.session_type === sess() && x.period_number === b.period_number), one = yl != null ? [bellFor(sess(), b.period_number, yl)].filter(Boolean) : rs;
+  if (!one.length) return '<th class="rc"></th>';
+  if (one.every(x => x.is_recess)) return `<th class="rc">${esc(one[0].label)}</th>`;
+  return `<th><b>${esc(one.find(x => !x.is_recess).label)}</b>${one.map(x => `<br><small>${one.length > 1 && x.recess_level ? 'T' + esc(x.recess_level) + ': ' : ''}${hhmm(x.start_time)}–${hhmm(x.end_time)}${x.is_recess ? ' R' : ''}</small>`).join('')}</th>`;
+}
+function rYl(r) { return ylOf(findSlot(r)?.class_ids); }
