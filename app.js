@@ -6,8 +6,8 @@
  */
 
 // 1. KONFIGURASI LALAI SUPABASE (Boleh diisi terus atau melalui Modal UI)
-const DEFAULT_SUPABASE_URL = "https://MASUKKAN_PROJECT_ID_ANDA.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY = "MASUKKAN_SUPABASE_ANON_KEY_ANDA";
+const DEFAULT_SUPABASE_URL = "https://gnfkkuqlopkwzlerizqv.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_wDU1YZM_RD1GAilOZHlBMw_v_zw5MyT";
 
 const App = {
   supabase: null,
